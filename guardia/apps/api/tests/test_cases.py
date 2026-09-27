@@ -155,3 +155,41 @@ def test_case_search_is_scoped_to_actor_visibility() -> None:
 
         actor[0] = other_victim
         assert client.get("/api/v1/cases", params={"q": "harassment"}).json() == []
+
+
+class ContactSession(AuditSession):
+    def __init__(self, emails: dict[UUID, str]) -> None:
+        self.emails = emails
+
+    async def scalar(self, statement: object) -> str | None:
+        owner_id = statement.whereclause.right.value  # type: ignore[attr-defined]
+        return self.emails.get(owner_id)
+
+
+def test_case_contact_is_visible_only_to_ngo_staff_with_access() -> None:
+    owner = user(Role.VICTIM)
+    assigned = user(Role.NGO_INVESTIGATOR)
+    unassigned = user(Role.NGO_INVESTIGATOR)
+    administrator = user(Role.ADMINISTRATOR)
+    cases = MemoryCases()
+    service = CaseService(cases, MemoryUsers([owner, assigned, unassigned, administrator]))
+    actor = [owner]
+    app = FastAPI()
+    app.include_router(cases_router, prefix="/api/v1")
+    app.dependency_overrides[get_case_service] = lambda: service
+    app.dependency_overrides[get_current_user] = lambda: actor[0]
+    app.dependency_overrides[get_session] = lambda: ContactSession({owner.id: owner.email})
+
+    with TestClient(app) as client:
+        case_id = client.post("/api/v1/cases", json={"title": "Reported post"}).json()["id"]
+        assert client.get(f"/api/v1/cases/{case_id}/contact").status_code == 403
+
+        actor[0] = administrator
+        assert client.get(f"/api/v1/cases/{case_id}/contact").json() == {"email": owner.email}
+        assert client.patch(f"/api/v1/cases/{case_id}/assignment", json={"investigator_id": str(assigned.id)}).status_code == 200
+
+        actor[0] = unassigned
+        assert client.get(f"/api/v1/cases/{case_id}/contact").status_code == 404
+
+        actor[0] = assigned
+        assert client.get(f"/api/v1/cases/{case_id}/contact").json() == {"email": owner.email}

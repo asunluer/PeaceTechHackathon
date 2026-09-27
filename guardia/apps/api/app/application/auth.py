@@ -61,6 +61,11 @@ class AuthService:
             raise PermissionDenied
         return await self._create_user(email, password, role, created_by=actor.id)
 
+    async def register_victim(self, email: str, password: str) -> AccessToken:
+        # Self-service sign-up can only ever produce a victim account; staff roles are granted by an administrator.
+        user = await self._create_user(email, password, Role.VICTIM, self_registered=True)
+        return self._tokens.issue(user)
+
     async def create_first_administrator(self, email: str, password: str) -> User:
         if await self._users.has_administrator():
             raise AdministratorExists
@@ -76,8 +81,8 @@ class AuthService:
             raise ValueError("New password must be different and contain 12 to 128 characters")
         await self._users.change_password(actor.id, await self._passwords.hash(new_password))
 
-    async def _create_user(self, email: str, password: str, role: Role, created_by: UUID | None = None) -> User:
+    async def _create_user(self, email: str, password: str, role: Role, created_by: UUID | None = None, self_registered: bool = False) -> User:
         if len(password) < 12 or len(password) > 128:
             raise ValueError("Password must contain between 12 and 128 characters")
         password_hash = await self._passwords.hash(password)
-        return await self._users.create(normalize_email(email), password_hash, role, created_by)
+        return await self._users.create(normalize_email(email), password_hash, role, created_by, self_registered)

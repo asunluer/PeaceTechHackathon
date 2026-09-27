@@ -31,7 +31,7 @@ class MemoryUsers:
     async def has_administrator(self) -> bool:
         return any(user.role == Role.ADMINISTRATOR for user in self.users.values())
 
-    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None) -> User:
+    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None, self_registered: bool = False) -> User:
         if await self.get_by_email(email):
             raise DuplicateEmail
         user = User(uuid4(), email, password_hash, role, True, 0, datetime.now(timezone.utc))
@@ -99,3 +99,34 @@ def test_authentication_and_role_guard_http_flow() -> None:
         assert client.post("/api/v1/auth/change-password", headers=investigator_headers, json={"current_password": new_user["password"], "new_password": "new-investigator-password"}).status_code == 204
         assert client.get("/api/v1/auth/me", headers=investigator_headers).status_code == 401
         assert client.post(token_url, data={"username": new_user["email"], "password": "new-investigator-password"}).status_code == 200
+
+
+def test_self_registration_always_creates_a_victim() -> None:
+    settings = Settings(
+        db_host="localhost",
+        db_name="test",
+        db_user="test",
+        db_password=SecretStr("test-password"),
+        jwt_secret=SecretStr("a-dedicated-test-secret-with-more-than-32-bytes"),
+    )
+    service = AuthService(MemoryUsers(), Argon2PasswordHasher(), PyJwtTokenCodec(settings))
+    app = FastAPI()
+    app.include_router(auth_router, prefix="/api/v1")
+    app.dependency_overrides[get_auth_service] = lambda: service
+
+    with TestClient(app) as client:
+        register_url = "/api/v1/auth/register"
+        response = client.post(register_url, json={"email": "  Survivor@Example.org ", "password": "a-long-enough-password"})
+        assert response.status_code == 201, response.text
+        assert response.headers["cache-control"] == "no-store"
+        headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+        account = client.get("/api/v1/auth/me", headers=headers).json()
+        assert account["role"] == "victim"
+        assert account["email"] == "survivor@example.org"
+
+        assert client.post(register_url, json={"email": "survivor@example.org", "password": "another-long-password"}).status_code == 409
+        assert client.post(register_url, json={"email": "short@example.org", "password": "too-short"}).status_code == 422
+        assert client.post(register_url, json={"email": "not-an-email", "password": "a-long-enough-password"}).status_code == 422
+        escalation = client.post(register_url, json={"email": "staff@example.org", "password": "a-long-enough-password", "role": "administrator"})
+        assert escalation.status_code == 422
+        assert client.post("/api/v1/auth/token", data={"username": "staff@example.org", "password": "a-long-enough-password"}).status_code == 401

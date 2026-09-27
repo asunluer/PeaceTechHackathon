@@ -6,10 +6,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.api.dependencies import get_auth_service, get_current_user
-from app.application.auth import AuthService, InvalidCredentials
+from app.application.auth import AuthService, DuplicateEmail, InvalidCredentials
 from app.domain.users import Role, User
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -34,6 +34,30 @@ class UserResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=12, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    # Rejecting unknown fields means a client cannot even attempt to choose its own role.
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
+
+
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    payload: RegisterRequest,
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+    response: Response,
+) -> TokenResponse:
+    try:
+        token = await auth.register_victim(str(payload.email), payload.password)
+    except DuplicateEmail as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return TokenResponse(access_token=token.value, expires_in=token.expires_in)
 
 
 @router.post("/token", response_model=TokenResponse)

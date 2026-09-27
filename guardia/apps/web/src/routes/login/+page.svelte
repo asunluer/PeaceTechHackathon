@@ -12,12 +12,12 @@
 <main class="flex min-h-screen items-center justify-center bg-slate-50 px-6 py-12">
   <div class="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
     <a href="/" class="text-sm font-semibold tracking-[0.18em] text-slate-700">GUARDIA</a>
-    <h1 class="mt-8 text-2xl font-semibold text-slate-900">Sign in</h1>
-    <p class="mt-2 text-sm text-slate-600">Access is limited to authorized accounts.</p>
+    <h1 class="mt-8 text-2xl font-semibold text-slate-900">NGO staff sign in</h1>
+    <p class="mt-2 text-sm text-slate-600">For NGO investigators and administrators. To report content, use the GUARDIA mobile app.</p>
     {#if data.passwordChanged}<p class="mt-6 rounded-md bg-green-50 px-4 py-3 text-sm text-green-900" role="status">Password changed. Sign in again.</p>{/if}
 
-    {#if form?.message}
-      <p class="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{form.message}</p>
+    {#if form?.message ?? data.staffOnly}
+      <p class="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{form?.message ?? data.staffOnly}</p>
     {/if}
 
     <form method="POST" class="mt-6 space-y-5">

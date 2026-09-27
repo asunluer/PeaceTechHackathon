@@ -33,7 +33,7 @@ class MemoryUsers:
     async def has_administrator(self) -> bool:
         return any(user.role == Role.ADMINISTRATOR for user in self.users.values())
 
-    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None) -> User:
+    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None, self_registered: bool = False) -> User:
         if await self.get_by_email(email):
             raise DuplicateEmail
         user = User(uuid4(), email, password_hash, role, True, 0, datetime.now(timezone.utc))

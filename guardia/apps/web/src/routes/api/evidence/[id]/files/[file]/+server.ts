@@ -1,8 +1,9 @@
 import { error } from '@sveltejs/kit';
-import { authorizedRequest } from '$lib/server/auth';
+import { authorizedRequest, requireAccount } from '$lib/server/auth';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async (event) => {
+  await requireAccount(event);
   const response = await authorizedRequest(event, `/evidence/${event.params.id}/files/${event.params.file}`, { signal: AbortSignal.timeout(60000) });
   if (!response.ok) error(response.status, 'Evidence file unavailable.');
   const contentType = response.headers.get('content-type') || 'application/octet-stream';

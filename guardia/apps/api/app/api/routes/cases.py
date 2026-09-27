@@ -15,7 +15,7 @@ from app.application.cases import CaseClosed, CaseNotFound, CasePermissionDenied
 from app.domain.cases import Case, SubmittedLink
 from app.domain.users import Role, User
 from app.infrastructure.case_repository import to_case
-from app.infrastructure.models import AuditLogRow, CaseNoteRow, CaseRow, SubmittedLinkRow, EvidenceRow
+from app.infrastructure.models import AuditLogRow, CaseNoteRow, CaseRow, SubmittedLinkRow, EvidenceRow, UserRow
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -171,6 +171,27 @@ async def read_case(
         return CaseResponse.from_domain(await cases.get_case(actor, case_id))
     except CaseNotFound as exc:
         raise HTTPException(status_code=404, detail="Case not found") from exc
+
+
+class CaseContactResponse(BaseModel):
+    email: str
+
+
+@router.get("/{case_id}/contact", response_model=CaseContactResponse)
+async def read_case_contact(
+    case_id: UUID,
+    actor: Annotated[User, Depends(require_roles(Role.NGO_INVESTIGATOR, Role.ADMINISTRATOR))],
+    cases: Annotated[CaseService, Depends(get_case_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CaseContactResponse:
+    try:
+        case = await cases.get_case(actor, case_id)
+    except CaseNotFound as exc:
+        raise HTTPException(status_code=404, detail="Case not found") from exc
+    email = await session.scalar(select(UserRow.email).where(UserRow.id == case.owner_id))
+    if email is None:
+        raise HTTPException(status_code=404, detail="Case owner not found")
+    return CaseContactResponse(email=email)
 
 
 @router.patch("/{case_id}/assignment", response_model=CaseResponse)

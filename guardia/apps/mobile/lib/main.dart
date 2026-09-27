@@ -28,7 +28,15 @@ class ApiClient {
     await storage.write(key: 'access_token', value: response.data!['access_token'] as String);
     return me();
   }
+  Future<Map<String, dynamic>> register(String email, String password) async {
+    final response = await dio.post<Map<String, dynamic>>('/auth/register', data: {'email': email, 'password': password});
+    await storage.write(key: 'access_token', value: response.data!['access_token'] as String);
+    return me();
+  }
   Future<Map<String, dynamic>> me() async => (await dio.get<Map<String, dynamic>>('/auth/me', options: await auth())).data!;
+  Future<void> addStatement(String caseId, String statement) async {
+    await dio.patch<void>('/cases/$caseId', data: {'victim_statement': statement}, options: await auth());
+  }
   Future<Map<String, dynamic>> submit(String url, String statement, String sharedText) async =>
     (await dio.post<Map<String, dynamic>>('/reports', data: {'url': url, 'victim_statement': statement.isEmpty ? null : statement, 'shared_text': sharedText.isEmpty ? null : sharedText}, options: await auth())).data!;
   Future<Map<String, dynamic>> evidence(String id) async => (await dio.get<Map<String, dynamic>>('/evidence/$id', options: await auth())).data!;
@@ -60,6 +68,10 @@ class Session extends ChangeNotifier {
       await api.storage.delete(key: 'access_token'); account = null;
       throw StateError('Use a victim account for mobile reporting.');
     }
+    notifyListeners();
+  }
+  Future<void> register(String email, String password) async {
+    account = await api.register(email, password);
     notifyListeners();
   }
   Future<void> expire() async { await api.storage.delete(key: 'access_token'); account = null; notifyListeners(); }
@@ -107,8 +119,10 @@ class _GuardiaAppState extends ConsumerState<GuardiaApp> {
   late final GoRouter router = GoRouter(routes: [
     GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
     GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+    GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
     GoRoute(path: '/password', builder: (context, state) => const PasswordScreen()),
     GoRoute(path: '/report', builder: (context, state) => const ReportScreen()),
+    GoRoute(path: '/send', builder: (context, state) => const SendSharedScreen()),
     GoRoute(path: '/receipt/:id', builder: (context, state) => ReceiptScreen(id: state.pathParameters['id']!)),
   ]);
   @override void initState() {
@@ -120,7 +134,7 @@ class _GuardiaAppState extends ConsumerState<GuardiaApp> {
   void receive(String? text) {
     if (text == null) return;
     ref.read(shareProvider).receive(text);
-    router.go('/report');
+    router.go('/send');
   }
   @override void dispose() { shares?.cancel(); router.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) => MaterialApp.router(
@@ -138,14 +152,18 @@ class HomeScreen extends ConsumerWidget {
       constraints: const BoxConstraints(maxWidth: 480), child: Padding(padding: const EdgeInsets.all(24),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Preserve public evidence', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 16), const Text('Share a public post to GUARDIA, or paste its link here. A case record will be created for review.'),
+        const SizedBox(height: 16), const Text('Share a public post to GUARDIA straight from the social app. A case is created and reviewed by an NGO.'),
         const SizedBox(height: 16), const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Only public pages can be captured. Do not submit passwords or private messages. If you are in immediate danger, contact local emergency services.'))),
         const SizedBox(height: 20),
-        if (session.loading) const CircularProgressIndicator() else if (session.account == null)
-          FilledButton(onPressed: () => context.go('/login'), child: const Text('Sign in'))
-        else ...[
+        if (session.loading) const CircularProgressIndicator() else if (session.account == null) ...[
+          FilledButton(onPressed: () => context.go('/login'), child: const Text('Sign in')),
+          TextButton(onPressed: () => context.go('/register'), child: const Text('Create an account')),
+        ] else ...[
           Text('Signed in as ${session.account!['email']}'),
-          FilledButton(onPressed: () => context.go('/report'), child: const Text('Report a public link')),
+          const SizedBox(height: 12),
+          const HowToReportSteps(),
+          const SizedBox(height: 12),
+          OutlinedButton(onPressed: () => context.go('/report'), child: const Text('Paste a link instead')),
           TextButton(onPressed: () => context.go('/password'), child: const Text('Change password')),
           TextButton(onPressed: () => ref.read(sessionProvider).logout(), child: const Text('Sign out')),
         ],
@@ -171,12 +189,141 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         const SizedBox(height: 20),
         FilledButton(onPressed: busy ? null : () async {
           setState(() { busy = true; message = null; });
-          try { await ref.read(sessionProvider).login(email.text.trim(), password.text); if (context.mounted) context.go('/report'); }
+          try { await ref.read(sessionProvider).login(email.text.trim(), password.text); if (context.mounted) await completeSignIn(context, ref); }
           catch (error) { if (mounted) setState(() => message = error is DioException ? 'Sign in failed. Check your details and connection.' : error.toString()); }
           finally { if (mounted) setState(() => busy = false); }
         }, child: const Text('Sign in')),
+        TextButton(onPressed: busy ? null : () => context.go('/register'), child: const Text('No account yet? Create one')),
       ]),
     ))));
+}
+
+class RegisterScreen extends ConsumerStatefulWidget {
+  const RegisterScreen({super.key});
+  @override ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
+}
+class _RegisterScreenState extends ConsumerState<RegisterScreen> {
+  final email = TextEditingController(), password = TextEditingController(), confirmation = TextEditingController();
+  bool busy = false; String? message;
+  @override void dispose() { email.dispose(); password.dispose(); confirmation.dispose(); super.dispose(); }
+  @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Create an account')),
+    body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: ListView(
+      padding: const EdgeInsets.all(24), children: [
+        const Text('Use an email address you can safely be contacted on. An NGO investigator may write to you about your reports.'),
+        const SizedBox(height: 16),
+        TextField(controller: email, keyboardType: TextInputType.emailAddress, autocorrect: false, decoration: const InputDecoration(labelText: 'Email')),
+        TextField(controller: password, obscureText: true, decoration: const InputDecoration(labelText: 'Password (at least 12 characters)')),
+        TextField(controller: confirmation, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm password')),
+        if (message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(message!, style: const TextStyle(color: Colors.red))),
+        const SizedBox(height: 20),
+        FilledButton(onPressed: busy ? null : () async {
+          if (password.text.length < 12 || password.text != confirmation.text) {
+            setState(() => message = 'Use at least 12 characters and confirm the password.');
+            return;
+          }
+          setState(() { busy = true; message = null; });
+          try {
+            await ref.read(sessionProvider).register(email.text.trim(), password.text);
+            if (context.mounted) await completeSignIn(context, ref);
+          } on DioException catch (error) {
+            final status = error.response?.statusCode;
+            if (mounted) setState(() => message = status == 409 ? 'An account with this email already exists. Sign in instead.' : status == 422 ? 'Enter a valid email and a password of at least 12 characters.' : 'Could not create the account. Check your connection.');
+          } finally {
+            if (mounted) setState(() => busy = false);
+          }
+        }, child: Text(busy ? 'Creating account…' : 'Create account')),
+        TextButton(onPressed: busy ? null : () => context.go('/login'), child: const Text('Already have an account? Sign in')),
+      ],
+    ))));
+}
+
+/// Shown after every sign-in or sign-up, then continues to any link shared while signed out.
+Future<void> completeSignIn(BuildContext context, WidgetRef ref) async {
+  final email = ref.read(sessionProvider).account?['email'] as String? ?? '';
+  await showDialog<void>(context: context, barrierDismissible: false, builder: (_) => HowToReportDialog(email: email));
+  if (!context.mounted) return;
+  context.go(ref.read(shareProvider).url.isNotEmpty ? '/send' : '/');
+}
+
+class HowToReportSteps extends StatelessWidget {
+  const HowToReportSteps({super.key});
+  @override Widget build(BuildContext context) => const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text('1. Open the post in Instagram, Facebook, TikTok, X, Reddit or Threads.'),
+    SizedBox(height: 6),
+    Text('2. Tap Share (if GUARDIA is not listed, tap More).'),
+    SizedBox(height: 6),
+    Text('3. Choose GUARDIA. The link is sent immediately; you can add what happened afterwards.'),
+  ]);
+}
+
+class HowToReportDialog extends StatelessWidget {
+  const HowToReportDialog({required this.email, super.key});
+  final String email;
+  @override Widget build(BuildContext context) => AlertDialog(
+    title: const Text('How to report'),
+    content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const HowToReportSteps(),
+      const Divider(height: 28),
+      Text('An NGO investigator may contact you by email at $email about your reports.'),
+    ])),
+    actions: [FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Got it'))],
+  );
+}
+
+class SendSharedScreen extends ConsumerStatefulWidget {
+  const SendSharedScreen({super.key});
+  @override ConsumerState<SendSharedScreen> createState() => _SendSharedScreenState();
+}
+class _SendSharedScreenState extends ConsumerState<SendSharedScreen> {
+  bool started = false, sending = false; String? message;
+  Future<void> send() async {
+    final shared = ref.read(shareProvider);
+    if (shared.url.isEmpty) return;
+    setState(() { sending = true; message = null; });
+    try {
+      final receipt = await ref.read(apiProvider).submit(shared.url, '', shared.sharedText);
+      if (mounted) context.go('/receipt/${receipt['evidence_id']}');
+      shared.clear();
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 401) {
+        await ref.read(sessionProvider).expire();
+        if (mounted) context.go('/login');
+      } else if (mounted) {
+        setState(() => message = 'Could not send the link. Check your connection and try again.');
+      }
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
+  }
+  @override Widget build(BuildContext context) {
+    final session = ref.watch(sessionProvider), shared = ref.watch(shareProvider);
+    // Wait for the stored session to load, then send without any form: signed-out users sign in first and return here.
+    if (!started && !session.loading) {
+      started = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (session.account == null) { context.go('/login'); } else { send(); }
+      });
+    }
+    return Scaffold(appBar: AppBar(title: const Text('Sending to GUARDIA')), body: Center(child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 480), child: Padding(padding: const EdgeInsets.all(24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (shared.url.isEmpty && !sending) ...[
+          const Text('No public link was found in what you shared.'),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: () => context.go('/report'), child: const Text('Paste a link')),
+        ] else if (message != null) ...[
+          Text(message!, style: const TextStyle(color: Colors.red)),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: send, child: const Text('Try again')),
+        ] else ...[
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(shared.url, textAlign: TextAlign.center),
+        ],
+      ]),
+    ))));
+  }
 }
 
 class PasswordScreen extends ConsumerStatefulWidget {
@@ -278,8 +425,23 @@ class ReceiptScreen extends ConsumerStatefulWidget {
   @override ConsumerState<ReceiptScreen> createState() => _ReceiptScreenState();
 }
 class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
-  Map<String, dynamic>? evidence; String? message; bool busy = false;
+  Map<String, dynamic>? evidence; String? message, statementMessage; bool busy = false, savingStatement = false, statementSaved = false;
+  final statement = TextEditingController();
   @override void initState() { super.initState(); refresh(); }
+  @override void dispose() { statement.dispose(); super.dispose(); }
+  Future<void> saveStatement() async {
+    final caseId = evidence?['case_id'] as String?, text = statement.text.trim();
+    if (caseId == null || text.isEmpty) return;
+    setState(() { savingStatement = true; statementMessage = null; });
+    try {
+      await ref.read(apiProvider).addStatement(caseId, text);
+      if (mounted) setState(() => statementSaved = true);
+    } on DioException catch (error) {
+      if (mounted) setState(() => statementMessage = error.response?.statusCode == 403 ? 'This case is already under review, so it can no longer be edited.' : 'Could not save. Check your connection and try again.');
+    } finally {
+      if (mounted) setState(() => savingStatement = false);
+    }
+  }
   Future<void> refresh() async {
     setState(() { busy = true; message = null; });
     try { final result = await ref.read(apiProvider).evidence(widget.id); if (mounted) setState(() => evidence = result); }
@@ -287,17 +449,26 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
     finally { if (mounted) setState(() => busy = false); }
   }
   @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Submission received')),
-    body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: Padding(
-      padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+    body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: ListView(
+      padding: const EdgeInsets.all(24), children: [
         Text('Your link was submitted', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 12), Text('Reference: ${widget.id}'),
         Text('Capture status: ${evidence?['capture_status'] ?? 'queued'}'),
         if (evidence?['capture_error'] != null) Text('Reason: ${evidence!['capture_error']}'),
         if (evidence?['hash_sha256'] != null) SelectableText('SHA-256: ${evidence!['hash_sha256']}'),
         if (message != null) Text(message!, style: const TextStyle(color: Colors.red)),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
         OutlinedButton(onPressed: busy ? null : refresh, child: const Text('Refresh status')),
+        const SizedBox(height: 24),
+        if (statementSaved)
+          const Text('Thank you. Your description was added to the case.')
+        else ...[
+          TextField(controller: statement, maxLines: 4, maxLength: 4000, decoration: const InputDecoration(labelText: 'What happened? (optional)', border: OutlineInputBorder())),
+          if (statementMessage != null) Text(statementMessage!, style: const TextStyle(color: Colors.red)),
+          OutlinedButton(onPressed: savingStatement || evidence?['case_id'] == null ? null : saveStatement, child: Text(savingStatement ? 'Saving…' : 'Add to the report')),
+        ],
+        const SizedBox(height: 12),
         TextButton(onPressed: () => context.go('/'), child: const Text('Done')),
-      ]),
+      ],
     ))));
 }

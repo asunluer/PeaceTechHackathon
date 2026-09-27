@@ -1,11 +1,9 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import { authorizedRequest } from '$lib/server/auth';
 import type { Case } from '$lib/types';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
-  const { account } = await event.parent();
-  if (account.role === 'victim') redirect(303, '/cases');
   const [casesResponse, statsResponse] = await Promise.all([
     authorizedRequest(event, '/cases?limit=8'),
     authorizedRequest(event, '/cases/stats')

@@ -64,5 +64,11 @@ export async function requireAccount(event: RequestEvent): Promise<Account> {
     redirect(303, '/login');
   }
   if (!response.ok) error(503, 'The authentication service is unavailable.');
-  return (await response.json()) as Account;
+  const account = (await response.json()) as Account;
+  // The web workspace is for NGO staff only; victims report through the mobile app.
+  if (account.role === 'victim') {
+    clearAccessToken(event);
+    redirect(303, '/login?staffOnly=1');
+  }
+  return account;
 }

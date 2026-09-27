@@ -4,10 +4,10 @@
   let { data, children } = $props();
   const links = [
     { href: '/dashboard', label: 'Dashboard', roles: ['ngo_investigator', 'administrator'] },
-    { href: '/cases', label: 'Cases', roles: ['victim', 'ngo_investigator', 'administrator'] },
+    { href: '/cases', label: 'Cases', roles: ['ngo_investigator', 'administrator'] },
     { href: '/reports', label: 'Reports', roles: ['ngo_investigator', 'administrator'] },
     { href: '/settings', label: 'Users', roles: ['administrator'] },
-    { href: '/profile', label: 'Profile', roles: ['victim', 'ngo_investigator', 'administrator'] }
+    { href: '/profile', label: 'Profile', roles: ['ngo_investigator', 'administrator'] }
   ];
 </script>
 

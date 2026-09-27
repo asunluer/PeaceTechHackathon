@@ -41,13 +41,15 @@ class SqlAlchemyUserRepository:
         )
         return user_id is not None
 
-    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None) -> User:
+    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None, self_registered: bool = False) -> User:
         row = UserRow(email=email, password_hash=password_hash, role=role)
         self._session.add(row)
         try:
             await self._session.flush()
             if created_by is not None:
                 self._session.add(AuditLogRow(user_id=created_by, action="user.created", target_type="user", target_id=row.id, details={"role": role.value}))
+            elif self_registered:
+                self._session.add(AuditLogRow(user_id=row.id, action="user.registered", target_type="user", target_id=row.id, details={"role": role.value}))
             await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()
