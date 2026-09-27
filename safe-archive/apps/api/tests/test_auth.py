@@ -33,7 +33,7 @@ class MemoryUsers:
     async def has_administrator(self) -> bool:
         return any(user.role == Role.ADMINISTRATOR for user in self.users.values())
 
-    async def create(self, email: str, password_hash: str, role: Role) -> User:
+    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None) -> User:
         if await self.get_by_email(email):
             raise DuplicateEmail
         user = User(uuid4(), email, password_hash, role, True, 0, datetime.now(timezone.utc))
@@ -42,6 +42,9 @@ class MemoryUsers:
 
     async def revoke_tokens(self, user_id: UUID) -> None:
         self.users[user_id] = replace(self.users[user_id], token_version=self.users[user_id].token_version + 1)
+
+    async def change_password(self, user_id: UUID, password_hash: str) -> None:
+        self.users[user_id] = replace(self.users[user_id], password_hash=password_hash, token_version=self.users[user_id].token_version + 1)
 
 
 @pytest.fixture
@@ -74,6 +77,21 @@ async def test_login_and_logout_revoke_existing_token(auth: tuple[AuthService, M
     await service.revoke_tokens(user.id)
     with pytest.raises(InvalidAccessToken):
         await service.current_user(token.value)
+
+
+@pytest.mark.asyncio
+async def test_password_change_revokes_existing_token(auth: tuple[AuthService, MemoryUsers, Settings]) -> None:
+    service, _, _ = auth
+    account = await service.create_first_administrator("admin@example.org", "original-long-password")
+    token = await service.authenticate(account.email, "original-long-password")
+    with pytest.raises(InvalidCredentials):
+        await service.change_password(account, "wrong-password", "another-long-password")
+    await service.change_password(account, "original-long-password", "another-long-password")
+    with pytest.raises(InvalidAccessToken):
+        await service.current_user(token.value)
+    with pytest.raises(InvalidCredentials):
+        await service.authenticate(account.email, "original-long-password")
+    await service.authenticate(account.email, "another-long-password")
 
 
 @pytest.mark.asyncio

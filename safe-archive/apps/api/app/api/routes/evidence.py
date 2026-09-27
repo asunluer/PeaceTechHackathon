@@ -185,6 +185,8 @@ async def list_analyses(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[AnalysisResponse]:
     await accessible_evidence(evidence_id, actor, cases, session)
+    if actor.role == Role.VICTIM:
+        raise HTTPException(status_code=403, detail="Investigator access required")
     rows = await session.scalars(select(AIAnalysisRow).where(AIAnalysisRow.evidence_id == evidence_id).order_by(AIAnalysisRow.created_at.desc()))
     return [AnalysisResponse.from_row(row) for row in rows]
 

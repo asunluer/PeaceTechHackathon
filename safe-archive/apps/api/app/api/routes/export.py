@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -37,7 +37,9 @@ async def export_case_report(
     for row in evidence:
         files_by_evidence[row.id] = list(await session.scalars(select(EvidenceFileRow).where(EvidenceFileRow.evidence_id == row.id)))
         analyses_by_evidence[row.id] = list(await session.scalars(select(AIAnalysisRow).where(AIAnalysisRow.evidence_id == row.id).order_by(AIAnalysisRow.created_at)))
-    payload = await run_in_threadpool(build_case_report, case, evidence, files_by_evidence, analyses_by_evidence)
+    evidence_ids = [row.id for row in evidence]
+    audit = list(await session.scalars(select(AuditLogRow).where(or_(AuditLogRow.target_id == case_id, AuditLogRow.target_id.in_(evidence_ids))).order_by(AuditLogRow.timestamp, AuditLogRow.id)))
+    payload = await run_in_threadpool(build_case_report, case, evidence, files_by_evidence, analyses_by_evidence, audit)
     session.add(AuditLogRow(user_id=actor.id, action="report.exported", target_type="case", target_id=case_id, details={"evidence_count": len(evidence)}))
     await session.commit()
     return Response(

@@ -58,24 +58,28 @@ class SqlAlchemyCaseRepository:
         base = self._scoped_to_actor(select(CaseRow), actor)
         if base is None:
             return []
-        # "Smart" search reaches past the case record into the evidence it produced:
-        # captured page text/title, the original URL, and any AI-derived summary or tags.
-        pattern = f"%{query_text.lower()}%"
+        # Search case and capture fields; derived AI fields are investigator-only.
+        escaped = query_text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         query = (
             base.outerjoin(SubmittedLinkRow, SubmittedLinkRow.case_id == CaseRow.id)
             .outerjoin(EvidenceRow, EvidenceRow.submitted_link_id == SubmittedLinkRow.id)
-            .outerjoin(AIAnalysisRow, AIAnalysisRow.evidence_id == EvidenceRow.id)
-            .where(
-                or_(
-                    CaseRow.title.ilike(pattern),
-                    CaseRow.victim_statement.ilike(pattern),
-                    EvidenceRow.page_title.ilike(pattern),
-                    EvidenceRow.visible_text.ilike(pattern),
-                    EvidenceRow.original_url.ilike(pattern),
-                    AIAnalysisRow.summary.ilike(pattern),
-                    cast(AIAnalysisRow.tags, Text).ilike(pattern),
-                )
-            )
+        )
+        predicates = [
+            CaseRow.title.ilike(pattern, escape="\\"),
+            CaseRow.victim_statement.ilike(pattern, escape="\\"),
+            EvidenceRow.page_title.ilike(pattern, escape="\\"),
+            EvidenceRow.visible_text.ilike(pattern, escape="\\"),
+            EvidenceRow.original_url.ilike(pattern, escape="\\"),
+        ]
+        if actor.role != Role.VICTIM:
+            query = query.outerjoin(AIAnalysisRow, AIAnalysisRow.evidence_id == EvidenceRow.id)
+            predicates.extend([
+                AIAnalysisRow.summary.ilike(pattern, escape="\\"),
+                cast(AIAnalysisRow.tags, Text).ilike(pattern, escape="\\"),
+            ])
+        query = (
+            query.where(or_(*predicates))
             .distinct()
             .order_by(CaseRow.created_at.desc(), CaseRow.id.desc())
             .limit(limit)

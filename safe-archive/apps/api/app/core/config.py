@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     storage_encryption_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
+    capture_proxy_url: str | None = None
 
     @field_validator("jwt_secret")
     @classmethod

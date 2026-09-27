@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.auth import DuplicateEmail
 from app.domain.users import Role, User
-from app.infrastructure.models import UserRow
+from app.infrastructure.models import AuditLogRow, UserRow
 
 
 def to_domain(row: UserRow) -> User:
@@ -41,10 +41,13 @@ class SqlAlchemyUserRepository:
         )
         return user_id is not None
 
-    async def create(self, email: str, password_hash: str, role: Role) -> User:
+    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None) -> User:
         row = UserRow(email=email, password_hash=password_hash, role=role)
         self._session.add(row)
         try:
+            await self._session.flush()
+            if created_by is not None:
+                self._session.add(AuditLogRow(user_id=created_by, action="user.created", target_type="user", target_id=row.id, details={"role": role.value}))
             await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()
@@ -58,4 +61,13 @@ class SqlAlchemyUserRepository:
             .where(UserRow.id == user_id)
             .values(token_version=UserRow.token_version + 1)
         )
+        await self._session.commit()
+
+    async def change_password(self, user_id: UUID, password_hash: str) -> None:
+        await self._session.execute(
+            update(UserRow)
+            .where(UserRow.id == user_id)
+            .values(password_hash=password_hash, token_version=UserRow.token_version + 1)
+        )
+        self._session.add(AuditLogRow(user_id=user_id, action="user.password_changed", target_type="user", target_id=user_id, details={}))
         await self._session.commit()

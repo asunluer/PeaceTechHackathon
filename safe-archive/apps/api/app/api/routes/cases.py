@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_case_service, get_current_user, get_session, require_roles
@@ -147,6 +147,20 @@ async def list_cases(
         raise HTTPException(status_code=403, detail="Insufficient permissions") from exc
 
 
+@router.get("/stats", response_model=dict[str, int])
+async def case_stats(
+    actor: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, int]:
+    query = select(CaseRow.status, func.count(CaseRow.id)).group_by(CaseRow.status)
+    if actor.role == Role.VICTIM:
+        query = query.where(CaseRow.owner_id == actor.id)
+    elif actor.role == Role.NGO_INVESTIGATOR:
+        query = query.where(CaseRow.assigned_investigator_id == actor.id)
+    counts = {status: count for status, count in await session.execute(query)}
+    return {"total": sum(counts.values()), "open": counts.get("open", 0), "in_review": counts.get("in_review", 0), "closed": counts.get("closed", 0), "archived": counts.get("archived", 0)}
+
+
 @router.get("/{case_id}", response_model=CaseResponse)
 async def read_case(
     case_id: UUID,
@@ -167,6 +181,7 @@ async def assign_investigator(
     cases: Annotated[CaseService, Depends(get_case_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CaseResponse:
+    session.add(AuditLogRow(user_id=actor.id, action="case.assigned", target_type="case", target_id=case_id, details={"investigator_id": str(payload.investigator_id) if payload.investigator_id else None}))
     try:
         case = await cases.assign_investigator(actor, case_id, payload.investigator_id)
     except CaseNotFound as exc:
@@ -175,8 +190,6 @@ async def assign_investigator(
         raise HTTPException(status_code=422, detail="Investigator must be an active NGO investigator account") from exc
     except CasePermissionDenied as exc:
         raise HTTPException(status_code=403, detail="Insufficient permissions") from exc
-    session.add(AuditLogRow(user_id=actor.id, action="case.assigned", target_type="case", target_id=case_id, details={"investigator_id": str(payload.investigator_id) if payload.investigator_id else None}))
-    await session.commit()
     return CaseResponse.from_domain(case)
 
 

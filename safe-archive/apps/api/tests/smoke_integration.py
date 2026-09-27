@@ -10,7 +10,7 @@ from app.cli.create_admin import create_administrator
 from app.application.auth import AdministratorExists
 from app.core.config import get_settings
 from app.infrastructure.database import Database
-from app.infrastructure.models import CaseRow, EvidenceRow
+from app.infrastructure.models import AIAnalysisRow, CaseRow, EvidenceRow
 from app.main import app
 
 PASSWORD = "IsolatedSmokePassphrase123!"
@@ -57,9 +57,32 @@ async def evidence_id_from_database():
         await database.dispose()
 
 
+async def add_test_analysis(evidence_id):
+    database = Database(get_settings())
+    try:
+        async with database.sessions() as session:
+            existing = await session.scalar(select(AIAnalysisRow.id).where(AIAnalysisRow.evidence_id == evidence_id, AIAnalysisRow.model_name == "smoke-test"))
+            if existing is not None:
+                return
+            session.add(AIAnalysisRow(
+                evidence_id=evidence_id,
+                model_name="smoke-test",
+                summary="AI-only smoke marker",
+                entities=[],
+                detected_threats=[],
+                detected_pii=[],
+                tags=["ai-smoke"],
+                timeline=[],
+            ))
+            await session.commit()
+    finally:
+        await database.dispose()
+
+
 def verify() -> None:
     evidence_id = asyncio.run(evidence_id_from_database())
     assert evidence_id is not None
+    asyncio.run(add_test_analysis(evidence_id))
     with TestClient(app) as client:
         admin = token(client, "admin@smoke.example.org")
         victim = token(client, "victim@smoke.example.org")
@@ -69,6 +92,12 @@ def verify() -> None:
         assert evidence.json()["capture_status"] == "captured", evidence.text
         assert len(evidence.json()["hash_sha256"]) == 64
         case_id = evidence.json()["case_id"]
+        assert client.get(f"/api/v1/evidence/{evidence_id}/analyses", headers=victim).status_code == 403
+        assert client.get(f"/api/v1/evidence/{evidence_id}/analyses", headers=investigator).status_code == 200
+        assert client.get("/api/v1/cases", params={"q": "AI-only smoke marker"}, headers=victim).json() == []
+        assert len(client.get("/api/v1/cases", params={"q": "AI-only smoke marker"}, headers=admin).json()) == 1
+        assert client.get("/api/v1/cases", params={"q": "%"}, headers=admin).json() == []
+        assert client.get("/api/v1/cases/stats", headers=admin).json()["total"] >= 1
         files = client.get(f"/api/v1/evidence/{evidence_id}/files", headers=investigator)
         assert files.status_code == 200, files.text
         assert {row["file_type"] for row in files.json()} == {"html", "full_screenshot", "focused_screenshot", "manifest"}
@@ -80,7 +109,9 @@ def verify() -> None:
         report = client.get(f"/api/v1/cases/{case_id}/report.pdf", headers=investigator)
         assert report.status_code == 200, report.text
         assert report.content.startswith(b"%PDF-")
-        assert client.get(f"/api/v1/cases/{case_id}/audit", headers=investigator).status_code == 200
+        audit = client.get(f"/api/v1/cases/{case_id}/audit", headers=investigator)
+        assert audit.status_code == 200
+        assert any(item["action"] == "case.assigned" for item in audit.json())
         note = client.post(f"/api/v1/cases/{case_id}/notes", headers=investigator, json={"body": "Reviewed example"})
         assert note.status_code == 201, note.text
         assert client.get(f"/api/v1/cases/{case_id}/notes", headers=investigator).json()[0]["body"] == "Reviewed example"

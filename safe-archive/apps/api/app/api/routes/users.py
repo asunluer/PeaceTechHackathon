@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,8 +45,17 @@ async def create_user(
 async def list_users(
     administrator: Annotated[User, Depends(require_roles(Role.ADMINISTRATOR))],
     session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    role: Role | None = None,
+    active: bool | None = None,
 ) -> list[UserResponse]:
-    rows = await session.scalars(select(UserRow).order_by(UserRow.created_at.desc()).limit(500))
+    query = select(UserRow)
+    if role is not None:
+        query = query.where(UserRow.role == role)
+    if active is not None:
+        query = query.where(UserRow.is_active.is_(active))
+    rows = await session.scalars(query.order_by(UserRow.created_at.desc(), UserRow.id.desc()).limit(limit).offset(offset))
     return [UserResponse.model_validate(row) for row in rows]
 
 
@@ -63,6 +72,7 @@ async def update_user(
     next_role = payload.role if payload.role is not None else row.role
     next_active = payload.is_active if payload.is_active is not None else row.is_active
     if row.role == Role.ADMINISTRATOR and row.is_active and (next_role != Role.ADMINISTRATOR or not next_active):
+        await session.execute(select(func.pg_advisory_xact_lock(87410923)))
         active_admins = await session.scalar(select(func.count(UserRow.id)).where(UserRow.role == Role.ADMINISTRATOR, UserRow.is_active.is_(True)))
         if active_admins is None or active_admins <= 1:
             raise HTTPException(status_code=409, detail="The last active administrator cannot be removed")

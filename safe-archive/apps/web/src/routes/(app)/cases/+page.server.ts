@@ -5,10 +5,13 @@ import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
   const q = event.url.searchParams.get('q')?.trim() ?? '';
-  const path = q ? `/cases?limit=100&q=${encodeURIComponent(q)}` : '/cases?limit=100';
+  const rawPage = Number(event.url.searchParams.get('page') ?? '1');
+  const page = Number.isSafeInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const path = `/cases?limit=51&offset=${(page - 1) * 50}${q ? `&q=${encodeURIComponent(q)}` : ''}`;
   const response = await authorizedRequest(event, path);
   if (!response.ok) error(503, 'Cases are temporarily unavailable.');
-  return { cases: (await response.json()) as Case[], query: q };
+  const batch = (await response.json()) as Case[];
+  return { cases: batch.slice(0, 50), query: q, page, hasMore: batch.length > 50 };
 };
 
 export const actions: Actions = {

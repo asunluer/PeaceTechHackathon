@@ -69,7 +69,7 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3000
-      ORIGIN: http://localhost:3000
+      ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       API_INTERNAL_URL: http://api:8000
     depends_on:
       api:
@@ -100,6 +100,7 @@ services:
       SAFE_ARCHIVE_JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       SAFE_ARCHIVE_STORAGE_ROOT: /data/evidence
       SAFE_ARCHIVE_STORAGE_ENCRYPTION_KEY: ${STORAGE_ENCRYPTION_KEY:?Set STORAGE_ENCRYPTION_KEY in .env}
+      SAFE_ARCHIVE_CAPTURE_PROXY_URL: ${CAPTURE_PROXY_URL:-}
     volumes:
       - evidence_data:/data/evidence
     depends_on:

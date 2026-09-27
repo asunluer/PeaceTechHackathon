@@ -18,9 +18,9 @@
 </div>
 
 <div class="mt-8 grid gap-4 sm:grid-cols-3">
-  <div class="rounded-xl border border-slate-200 bg-white p-6"><p class="text-sm text-slate-500">Visible cases</p><p class="mt-3 text-3xl font-semibold">{data.cases.length}</p></div>
-  <div class="rounded-xl border border-slate-200 bg-white p-6"><p class="text-sm text-slate-500">In review</p><p class="mt-3 text-3xl font-semibold">{data.cases.filter((item) => item.status === 'in_review').length}</p></div>
-  <div class="rounded-xl border border-slate-200 bg-white p-6"><p class="text-sm text-slate-500">Open</p><p class="mt-3 text-3xl font-semibold">{data.cases.filter((item) => item.status === 'open').length}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-6"><p class="text-sm text-slate-500">Visible cases</p><p class="mt-3 text-3xl font-semibold">{data.stats.total}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-6"><p class="text-sm text-slate-500">In review</p><p class="mt-3 text-3xl font-semibold">{data.stats.in_review}</p></div>
+  <div class="rounded-xl border border-slate-200 bg-white p-6"><p class="text-sm text-slate-500">Open</p><p class="mt-3 text-3xl font-semibold">{data.stats.open}</p></div>
 </div>
 
 <section class="mt-10 rounded-xl border border-slate-200 bg-white">

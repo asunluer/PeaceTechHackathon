@@ -32,6 +32,9 @@ class ApiClient {
   Future<Map<String, dynamic>> submit(String url, String statement, String sharedText) async =>
     (await dio.post<Map<String, dynamic>>('/reports', data: {'url': url, 'victim_statement': statement.isEmpty ? null : statement, 'shared_text': sharedText.isEmpty ? null : sharedText}, options: await auth())).data!;
   Future<Map<String, dynamic>> evidence(String id) async => (await dio.get<Map<String, dynamic>>('/evidence/$id', options: await auth())).data!;
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    await dio.post<void>('/auth/change-password', data: {'current_password': currentPassword, 'new_password': newPassword}, options: await auth());
+  }
   Future<void> logout() async {
     try { await dio.post<void>('/auth/logout', options: await auth()); } finally { await storage.delete(key: 'access_token'); }
   }
@@ -43,7 +46,11 @@ class Session extends ChangeNotifier {
   Map<String, dynamic>? account;
   bool loading = true;
   Future<void> restore() async {
-    try { if (await api.token() != null) account = await api.me(); } catch (_) { account = null; }
+    try { if (await api.token() != null) account = await api.me(); }
+    on DioException catch (error) {
+      account = null;
+      if (error.response?.statusCode == 401) await api.storage.delete(key: 'access_token');
+    } catch (_) { account = null; }
     if (account != null && account!['role'] != 'victim') { await api.storage.delete(key: 'access_token'); account = null; }
     loading = false; notifyListeners();
   }
@@ -55,7 +62,14 @@ class Session extends ChangeNotifier {
     }
     notifyListeners();
   }
-  Future<void> logout() async { await api.logout(); account = null; notifyListeners(); }
+  Future<void> expire() async { await api.storage.delete(key: 'access_token'); account = null; notifyListeners(); }
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    await api.changePassword(currentPassword, newPassword);
+    await expire();
+  }
+  Future<void> logout() async {
+    try { await api.logout(); } finally { account = null; notifyListeners(); }
+  }
 }
 
 class SharedReport extends ChangeNotifier {
@@ -65,7 +79,11 @@ class SharedReport extends ChangeNotifier {
     if (value == null || value.trim().isEmpty) return;
     final text = value.trim();
     final match = RegExp(r"https?://[^\s<>]+", caseSensitive: false).firstMatch(text);
-    if (match != null) url = match.group(0)!.replaceAll(RegExp(r'[.,;!?]+$'), '');
+    if (match != null) {
+      final candidate = match.group(0)!.replaceAll(RegExp(r'''[.,;!?)\]\}"']+$'''), '');
+      final parsed = Uri.tryParse(candidate);
+      if (parsed != null && parsed.host.isNotEmpty) url = candidate;
+    }
     sharedText = text.length > 4000 ? text.substring(0, 4000) : text;
     notifyListeners();
   }
@@ -89,6 +107,7 @@ class _SafeArchiveAppState extends ConsumerState<SafeArchiveApp> {
   late final GoRouter router = GoRouter(routes: [
     GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
     GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+    GoRoute(path: '/password', builder: (context, state) => const PasswordScreen()),
     GoRoute(path: '/report', builder: (context, state) => const ReportScreen()),
     GoRoute(path: '/receipt/:id', builder: (context, state) => ReceiptScreen(id: state.pathParameters['id']!)),
   ]);
@@ -127,6 +146,7 @@ class HomeScreen extends ConsumerWidget {
         else ...[
           Text('Signed in as ${session.account!['email']}'),
           FilledButton(onPressed: () => context.go('/report'), child: const Text('Report a public link')),
+          TextButton(onPressed: () => context.go('/password'), child: const Text('Change password')),
           TextButton(onPressed: () => ref.read(sessionProvider).logout(), child: const Text('Sign out')),
         ],
       ]),
@@ -159,17 +179,59 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ))));
 }
 
+class PasswordScreen extends ConsumerStatefulWidget {
+  const PasswordScreen({super.key});
+  @override ConsumerState<PasswordScreen> createState() => _PasswordScreenState();
+}
+
+class _PasswordScreenState extends ConsumerState<PasswordScreen> {
+  final current = TextEditingController(), next = TextEditingController(), confirmation = TextEditingController();
+  bool busy = false;
+  String? message;
+  @override void dispose() { current.dispose(); next.dispose(); confirmation.dispose(); super.dispose(); }
+  @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Change password')),
+    body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: ListView(
+      padding: const EdgeInsets.all(24), children: [
+        TextField(controller: current, obscureText: true, decoration: const InputDecoration(labelText: 'Current password')),
+        TextField(controller: next, obscureText: true, decoration: const InputDecoration(labelText: 'New password')),
+        TextField(controller: confirmation, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm new password')),
+        if (message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(message!, style: const TextStyle(color: Colors.red))),
+        const SizedBox(height: 20),
+        FilledButton(onPressed: busy ? null : () async {
+          if (next.text.length < 12 || next.text != confirmation.text) {
+            setState(() => message = 'Use at least 12 characters and confirm the new password.');
+            return;
+          }
+          setState(() { busy = true; message = null; });
+          try {
+            await ref.read(sessionProvider).changePassword(current.text, next.text);
+            if (context.mounted) context.go('/login');
+          } on DioException catch (error) {
+            if (mounted) setState(() => message = error.response?.statusCode == 400 ? 'Current password is incorrect.' : 'Could not change the password.');
+          } finally {
+            if (mounted) setState(() => busy = false);
+          }
+        }, child: const Text('Change password')),
+      ],
+    ))));
+}
+
 class ReportScreen extends ConsumerStatefulWidget {
   const ReportScreen({super.key});
   @override ConsumerState<ReportScreen> createState() => _ReportScreenState();
 }
 class _ReportScreenState extends ConsumerState<ReportScreen> {
   final url = TextEditingController(), statement = TextEditingController();
-  bool busy = false, seeded = false; String? message;
+  bool busy = false; String? seededShareUrl, message;
   @override void dispose() { url.dispose(); statement.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider), shared = ref.watch(shareProvider);
-    if (!seeded && shared.url.isNotEmpty) { url.text = shared.url; seeded = true; }
+    if (shared.url.isEmpty) {
+      seededShareUrl = null;
+    } else if (seededShareUrl != shared.url) {
+      url.text = shared.url;
+      seededShareUrl = shared.url;
+    }
     return Scaffold(appBar: AppBar(title: const Text('Report a public link')), body: Center(child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 540), child: ListView(padding: const EdgeInsets.all(24), children: [
         if (session.account == null) ...[
@@ -196,7 +258,12 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               ref.read(shareProvider).clear();
               if (context.mounted) context.go('/receipt/${receipt['evidence_id']}');
             } on DioException catch (error) {
-              if (mounted) setState(() => message = error.response?.statusCode == 401 ? 'Session expired. Sign in again.' : 'Could not submit. Check your connection and link.');
+              if (error.response?.statusCode == 401) {
+                await ref.read(sessionProvider).expire();
+                if (context.mounted) context.go('/login');
+              } else if (mounted) {
+                setState(() => message = 'Could not submit. Check your connection and link.');
+              }
             } finally { if (mounted) setState(() => busy = false); }
           }, child: Text(busy ? 'Submitting…' : 'Submit report')),
         ],

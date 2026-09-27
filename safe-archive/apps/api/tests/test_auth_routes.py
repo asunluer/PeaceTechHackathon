@@ -31,7 +31,7 @@ class MemoryUsers:
     async def has_administrator(self) -> bool:
         return any(user.role == Role.ADMINISTRATOR for user in self.users.values())
 
-    async def create(self, email: str, password_hash: str, role: Role) -> User:
+    async def create(self, email: str, password_hash: str, role: Role, created_by: UUID | None = None) -> User:
         if await self.get_by_email(email):
             raise DuplicateEmail
         user = User(uuid4(), email, password_hash, role, True, 0, datetime.now(timezone.utc))
@@ -40,6 +40,9 @@ class MemoryUsers:
 
     async def revoke_tokens(self, user_id: UUID) -> None:
         self.users[user_id] = replace(self.users[user_id], token_version=self.users[user_id].token_version + 1)
+
+    async def change_password(self, user_id: UUID, password_hash: str) -> None:
+        self.users[user_id] = replace(self.users[user_id], password_hash=password_hash, token_version=self.users[user_id].token_version + 1)
 
 
 def test_authentication_and_role_guard_http_flow() -> None:
@@ -87,3 +90,7 @@ def test_authentication_and_role_guard_http_flow() -> None:
         assert client.post("/api/v1/auth/logout", headers=admin_headers).status_code == 204
         assert client.get("/api/v1/auth/me", headers=admin_headers).status_code == 401
         assert client.get("/api/v1/auth/me", headers=investigator_headers).status_code == 200
+        assert client.post("/api/v1/auth/change-password", headers=investigator_headers, json={"current_password": "wrong", "new_password": "new-investigator-password"}).status_code == 400
+        assert client.post("/api/v1/auth/change-password", headers=investigator_headers, json={"current_password": new_user["password"], "new_password": "new-investigator-password"}).status_code == 204
+        assert client.get("/api/v1/auth/me", headers=investigator_headers).status_code == 401
+        assert client.post(token_url, data={"username": new_user["email"], "password": "new-investigator-password"}).status_code == 200

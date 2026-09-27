@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { ActionData } from './$types';
+  import type { ActionData, PageData } from './$types';
 
-  let { form }: { form: ActionData } = $props();
+  let { form, data }: { form: ActionData; data: PageData } = $props();
 </script>
 
 <svelte:head>
@@ -14,6 +14,7 @@
     <a href="/" class="text-sm font-semibold tracking-[0.18em] text-slate-700">SAFE-ARCHIVE</a>
     <h1 class="mt-8 text-2xl font-semibold text-slate-900">Sign in</h1>
     <p class="mt-2 text-sm text-slate-600">Access is limited to authorized accounts.</p>
+    {#if data.passwordChanged}<p class="mt-6 rounded-md bg-green-50 px-4 py-3 text-sm text-green-900" role="status">Password changed. Sign in again.</p>{/if}
 
     {#if form?.message}
       <p class="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{form.message}</p>

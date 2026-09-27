@@ -28,7 +28,7 @@ def _safe(value: object, limit: int = 4000) -> str:
     return escape(str(value if value is not None else "—")[:limit]).replace("\n", "<br/>")
 
 
-def build_case_report(case, evidence_rows: list, files_by_evidence: dict, analyses_by_evidence: dict) -> bytes:
+def build_case_report(case, evidence_rows: list, files_by_evidence: dict, analyses_by_evidence: dict, audit_rows: list | None = None) -> bytes:
     buffer = BytesIO()
     font = _font_name()
     styles = getSampleStyleSheet()
@@ -67,11 +67,16 @@ def build_case_report(case, evidence_rows: list, files_by_evidence: dict, analys
     else:
         story.append(Paragraph("No evidence has been submitted.", styles["ArchiveBody"]))
     story.append(Paragraph("Timeline", styles["ArchiveHeading"]))
-    story.append(Paragraph(f"{_safe(case.created_at)} — Case created", styles["ArchiveBody"]))
+    events = [(case.created_at, "Case created")]
     for evidence in evidence_rows:
-        story.append(Paragraph(f"{_safe(evidence.created_at)} — Evidence {_safe(evidence.id)} submitted", styles["ArchiveBody"]))
+        events.append((evidence.created_at, f"Evidence {evidence.id} submitted"))
         if evidence.capture_timestamp:
-            story.append(Paragraph(f"{_safe(evidence.capture_timestamp)} — Public page captured", styles["ArchiveBody"]))
+            events.append((evidence.capture_timestamp, f"Public page captured for evidence {evidence.id}"))
+    for entry in audit_rows or []:
+        if entry.action not in {"case.created", "report.submitted", "evidence.captured"}:
+            events.append((entry.timestamp, entry.action.replace(".", " ").replace("_", " ").capitalize()))
+    for timestamp, description in sorted(events, key=lambda item: item[0]):
+        story.append(Paragraph(f"{_safe(timestamp)} — {_safe(description)}", styles["ArchiveBody"]))
     for evidence in evidence_rows:
         block = [
             Paragraph(f"Evidence {_safe(evidence.id)}", styles["ArchiveHeading"]),
@@ -85,6 +90,11 @@ def build_case_report(case, evidence_rows: list, files_by_evidence: dict, analys
             Paragraph("Visible text excerpt", styles["ArchiveHeading"]),
             Paragraph(_safe(evidence.visible_text or "No visible text captured.", 5000), styles["ArchiveBody"]),
         ]
+        if evidence.visible_comments:
+            block.extend([
+                Paragraph("Visible comments excerpt", styles["ArchiveHeading"]),
+                Paragraph(_safe(evidence.visible_comments, 5000), styles["ArchiveBody"]),
+            ])
         story.append(KeepTogether(block[:5]))
         story.extend(block[5:])
         story.append(Paragraph("Preserved files", styles["ArchiveHeading"]))
@@ -97,6 +107,10 @@ def build_case_report(case, evidence_rows: list, files_by_evidence: dict, analys
                 story.append(Paragraph(f"<b>Model:</b> {_safe(analysis.model_name)} | <b>Generated:</b> {_safe(analysis.created_at)}", styles["ArchiveSmall"]))
                 story.append(Paragraph(_safe(analysis.summary), styles["ArchiveBody"]))
                 story.append(Paragraph(f"<b>Suggested tags:</b> {_safe(', '.join(analysis.tags))}", styles["ArchiveSmall"]))
+                for label, attribute in (("Entities", "entities"), ("Threat indicators", "detected_threats"), ("PII indicators", "detected_pii"), ("Suggested timeline", "timeline")):
+                    values = getattr(analysis, attribute, [])
+                    if values:
+                        story.append(Paragraph(f"<b>{label}:</b> {_safe('; '.join(values))}", styles["ArchiveSmall"]))
 
     def footer(canvas, document):
         canvas.saveState()

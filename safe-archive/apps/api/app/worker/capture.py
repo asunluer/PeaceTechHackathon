@@ -11,7 +11,7 @@ from hashlib import sha256
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select
 
 from app.core.config import get_settings
 from app.infrastructure.database import Database
@@ -68,12 +68,43 @@ async def _first_attribute(page, selectors: list[tuple[str, str | None]]) -> str
     return None
 
 
-async def capture_page(url: str) -> CapturedPage:
+async def _visible_comments(page) -> str | None:
+    comments: list[str] = []
+    for selector in ('[data-testid*="comment"]', '[aria-label*="comment" i]'):
+        locator = page.locator(selector)
+        try:
+            for index in range(min(await locator.count(), 20)):
+                item = locator.nth(index)
+                if not await item.is_visible():
+                    continue
+                value = (await item.inner_text(timeout=1000)).strip()
+                if value and value.lower() not in {"comment", "comments", "add comment", "view comments", "reply"} and value not in comments:
+                    comments.append(value[:1000])
+        except Exception:
+            continue
+    return "\n\n".join(comments)[:10000] or None
+
+
+async def _focused_screenshot(page) -> bytes:
+    for selector in ('article', '[role="article"]', '[data-testid*="post"]', 'main'):
+        locator = page.locator(selector).first
+        try:
+            if await locator.count() and await locator.is_visible():
+                return await locator.screenshot(timeout=5000, animations="disabled")
+        except Exception:
+            continue
+    return await page.screenshot(full_page=False, animations="disabled")
+
+
+async def capture_page(url: str, proxy_url: str | None = None) -> CapturedPage:
     from playwright.async_api import async_playwright
 
     await require_public_url(url)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True, chromium_sandbox=True)
+        launch_options = {"headless": True, "chromium_sandbox": True}
+        if proxy_url:
+            launch_options["proxy"] = {"server": proxy_url}
+        browser = await playwright.chromium.launch(**launch_options)
         try:
             context = await browser.new_context(
                 accept_downloads=False,
@@ -110,13 +141,10 @@ async def capture_page(url: str) -> CapturedPage:
                 ("time[datetime]", "datetime"),
                 ("time", None),
             ])
-            comments = await _first_attribute(page, [
-                ('[aria-label="Comments"]', None),
-                ('[data-testid*="comment"]', None),
-            ])
+            comments = await _visible_comments(page)
             html = (await page.content()).encode("utf-8")
             full = await page.screenshot(full_page=True, animations="disabled")
-            focus = await page.screenshot(full_page=False, animations="disabled")
+            focus = await _focused_screenshot(page)
             files = {
                 "html": ("text/html; charset=utf-8", html),
                 "full_screenshot": ("image/png", full),
@@ -133,11 +161,16 @@ async def capture_page(url: str) -> CapturedPage:
 async def claim_job(database: Database) -> CaptureJob | None:
     now = datetime.now(timezone.utc)
     async with database.sessions() as session:
-        await session.execute(
-            update(EvidenceRow)
+        timed_out = await session.scalars(
+            select(EvidenceRow)
             .where(EvidenceRow.capture_status == "capturing", EvidenceRow.capture_started_at < now - timedelta(minutes=10), EvidenceRow.capture_attempts >= 3)
-            .values(capture_status="failed", capture_error="Capture worker timed out")
+            .with_for_update(skip_locked=True)
+            .limit(100)
         )
+        for expired in timed_out:
+            expired.capture_status = "failed"
+            expired.capture_error = "Capture worker timed out"
+            session.add(AuditLogRow(user_id=None, action="evidence.capture_failed", target_type="evidence", target_id=expired.id, details={"error": "WorkerTimeout"}))
         row = await session.scalar(
             select(EvidenceRow)
             .where(
@@ -227,6 +260,8 @@ async def fail_job(database: Database, job: CaptureJob, error: Exception) -> Non
 async def run_worker() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = get_settings()
+    if settings.environment == "production" and not settings.capture_proxy_url:
+        raise RuntimeError("Production capture requires an outbound filtering proxy")
     storage = storage_from_settings(settings)
     database = Database(settings)
     try:
@@ -236,7 +271,7 @@ async def run_worker() -> None:
                 await asyncio.sleep(5)
                 continue
             try:
-                page = await capture_page(job.url)
+                page = await capture_page(job.url, settings.capture_proxy_url)
                 package_hash, records = store_capture(storage, job.evidence_id, page)
                 await complete_job(database, job, page, package_hash, records)
                 LOGGER.info("Captured evidence %s", job.evidence_id)

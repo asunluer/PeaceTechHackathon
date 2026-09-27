@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.api.dependencies import get_auth_service, get_current_user
 from app.application.auth import AuthService, InvalidCredentials
@@ -29,6 +29,11 @@ class UserResponse(BaseModel):
     role: Role
     is_active: bool
     created_at: datetime
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=12, max_length=128)
 
 
 @router.post("/token", response_model=TokenResponse)
@@ -60,3 +65,17 @@ async def logout(
     auth: Annotated[AuthService, Depends(get_auth_service)],
 ) -> None:
     await auth.revoke_tokens(user.id)
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: ChangePasswordRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    auth: Annotated[AuthService, Depends(get_auth_service)],
+) -> None:
+    try:
+        await auth.change_password(user, payload.current_password, payload.new_password)
+    except InvalidCredentials as exc:
+        raise HTTPException(status_code=400, detail="Current password is incorrect") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

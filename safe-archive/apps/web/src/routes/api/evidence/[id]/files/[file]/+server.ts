@@ -3,7 +3,7 @@ import { authorizedRequest } from '$lib/server/auth';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async (event) => {
-  const response = await authorizedRequest(event, `/evidence/${event.params.id}/files/${event.params.file}`);
+  const response = await authorizedRequest(event, `/evidence/${event.params.id}/files/${event.params.file}`, { signal: AbortSignal.timeout(60000) });
   if (!response.ok) error(response.status, 'Evidence file unavailable.');
   const contentType = response.headers.get('content-type') || 'application/octet-stream';
   const wantsPreview = event.url.searchParams.get('preview') === '1';

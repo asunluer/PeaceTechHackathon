@@ -1,6 +1,8 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { apiRequest, setAccessToken } from '$lib/server/auth';
-import type { Actions } from './$types';
+import type { Actions, PageServerLoad } from './$types';
+
+export const load: PageServerLoad = ({ url }) => ({ passwordChanged: url.searchParams.has('passwordChanged') });
 
 export const actions: Actions = {
   default: async (event) => {

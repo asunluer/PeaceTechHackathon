@@ -51,7 +51,7 @@ def test_capture_rejects_local_or_non_http_urls() -> None:
 def test_report_contains_evidence_and_marks_ai_as_derived() -> None:
     now = datetime.now(timezone.utc)
     case = SimpleNamespace(id=uuid4(), title="Example case", status="open", created_at=now, victim_statement="Victim statement")
-    evidence = SimpleNamespace(id=uuid4(), platform="other", capture_status="captured", capture_timestamp=now, created_at=now, original_url="https://example.com", hash_sha256="a" * 64, page_title="Example Domain", visible_author=None, visible_timestamp=None, visible_text="Visible public text")
+    evidence = SimpleNamespace(id=uuid4(), platform="other", capture_status="captured", capture_timestamp=now, created_at=now, original_url="https://example.com", hash_sha256="a" * 64, page_title="Example Domain", visible_author=None, visible_timestamp=None, visible_text="Visible public text", visible_comments="A visible public comment")
     analysis = SimpleNamespace(model_name="test-model", created_at=now, summary="AI summary", tags=["review"])
     payload = build_case_report(case, [evidence], {}, {evidence.id: [analysis]})
     assert payload.startswith(b"%PDF-")

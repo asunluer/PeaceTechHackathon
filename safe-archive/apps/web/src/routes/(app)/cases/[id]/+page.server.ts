@@ -13,24 +13,41 @@ async function read<T>(event: Parameters<PageServerLoad>[0], path: string): Prom
 export const load: PageServerLoad = async (event) => {
   const id = event.params.id;
   const { account } = await event.parent();
+  const rawPage = Number(event.url.searchParams.get('evidencePage') ?? '1');
+  const evidencePage = Number.isSafeInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const evidenceOffset = (evidencePage - 1) * 50;
   const caseRecord = await read<Case>(event, `/cases/${id}`);
-  const [evidence, timeline, links] = await Promise.all([
-    read<Evidence[]>(event, `/cases/${id}/evidence`),
+  const [evidenceBatch, timeline] = await Promise.all([
+    read<Evidence[]>(event, `/cases/${id}/evidence?limit=51&offset=${evidenceOffset}`),
     read<TimelineEvent[]>(event, `/cases/${id}/timeline`),
-    read<SubmittedLink[]>(event, `/cases/${id}/links`)
   ]);
+  const evidence = evidenceBatch.slice(0, 50);
+  const hasMoreEvidence = evidenceBatch.length > 50;
+  const links: SubmittedLink[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const batch = await read<SubmittedLink[]>(event, `/cases/${id}/links?limit=100&offset=${offset}`);
+    links.push(...batch);
+    if (batch.length < 100) break;
+  }
   const files: Record<string, EvidenceFile[]> = {};
   const analyses: Record<string, Analysis[]> = {};
   await Promise.all(evidence.map(async (item) => {
     [files[item.id], analyses[item.id]] = await Promise.all([
       read<EvidenceFile[]>(event, `/evidence/${item.id}/files`),
-      read<Analysis[]>(event, `/evidence/${item.id}/analyses`)
+      account.role === 'victim' ? Promise.resolve([]) : read<Analysis[]>(event, `/evidence/${item.id}/analyses`)
     ]);
   }));
   const notes = account.role === 'victim' ? [] : await read<CaseNote[]>(event, `/cases/${id}/notes`);
   const audit = account.role === 'victim' ? [] : await read<Audit[]>(event, `/cases/${id}/audit`);
-  const users = account.role === 'administrator' ? await read<{ id: string; email: string; role: string; is_active: boolean }[]>(event, '/users') : [];
-  return { caseRecord, evidence, files, analyses, timeline, links, notes, audit, users };
+  const users: { id: string; email: string; role: string; is_active: boolean }[] = [];
+  if (account.role === 'administrator') {
+    for (let offset = 0; ; offset += 100) {
+      const batch = await read<typeof users>(event, `/users?role=ngo_investigator&active=true&limit=100&offset=${offset}`);
+      users.push(...batch);
+      if (batch.length < 100) break;
+    }
+  }
+  return { caseRecord, evidence, files, analyses, timeline, links, notes, audit, users, evidencePage, hasMoreEvidence };
 };
 
 export const actions: Actions = {

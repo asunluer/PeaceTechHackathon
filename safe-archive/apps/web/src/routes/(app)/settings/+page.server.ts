@@ -6,9 +6,12 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async (event) => {
   const { account } = await event.parent();
   if (account.role !== 'administrator') redirect(303, '/dashboard');
-  const response = await authorizedRequest(event, '/users');
+  const rawPage = Number(event.url.searchParams.get('page') ?? '1');
+  const page = Number.isSafeInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const response = await authorizedRequest(event, `/users?limit=51&offset=${(page - 1) * 50}`);
   if (!response.ok) error(response.status, 'User list is unavailable.');
-  return { users: (await response.json()) as Account[] };
+  const batch = (await response.json()) as Account[];
+  return { users: batch.slice(0, 50), page, hasMore: batch.length > 50 };
 };
 
 export const actions: Actions = {

@@ -23,6 +23,7 @@
     id="case-search"
     name="q"
     type="search"
+    maxlength="200"
     value={data.query}
     placeholder="Search titles, statements, captured text, tags…"
     class="w-full max-w-md rounded-md border border-slate-300 px-3 py-2 text-sm"
@@ -55,3 +56,10 @@
     </ul>
   {/if}
 </section>
+{#if data.page > 1 || data.hasMore}
+  <nav aria-label="Case pages" class="mt-4 flex items-center gap-4 text-sm">
+    {#if data.page > 1}<a class="font-medium text-blue-700 underline" href={`?page=${data.page - 1}${data.query ? `&q=${encodeURIComponent(data.query)}` : ''}`}>Previous</a>{/if}
+    <span>Page {data.page}</span>
+    {#if data.hasMore}<a class="font-medium text-blue-700 underline" href={`?page=${data.page + 1}${data.query ? `&q=${encodeURIComponent(data.query)}` : ''}`}>Next</a>{/if}
+  </nav>
+{/if}
