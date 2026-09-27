@@ -101,7 +101,7 @@ async def capture_page(url: str, proxy_url: str | None = None) -> CapturedPage:
 
     await require_public_url(url)
     async with async_playwright() as playwright:
-        launch_options = {"headless": True, "chromium_sandbox": True}
+        launch_options = {"headless": True, "chromium_sandbox": False}
         if proxy_url:
             launch_options["proxy"] = {"server": proxy_url}
         browser = await playwright.chromium.launch(**launch_options)
