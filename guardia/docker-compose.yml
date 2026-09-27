@@ -1,0 +1,113 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ./apps/api
+      dockerfile: ../../docker/api.Dockerfile
+    image: guardia-api:local
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      GUARDIA_ENVIRONMENT: ${GUARDIA_ENVIRONMENT:-development}
+      GUARDIA_DB_HOST: db
+      GUARDIA_DB_NAME: ${POSTGRES_DB}
+      GUARDIA_DB_USER: ${POSTGRES_USER}
+      GUARDIA_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      GUARDIA_JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: ../../docker/api.Dockerfile
+    image: guardia-api:local
+    restart: unless-stopped
+    environment:
+      GUARDIA_ENVIRONMENT: ${GUARDIA_ENVIRONMENT:-development}
+      GUARDIA_DB_HOST: db
+      GUARDIA_DB_NAME: ${POSTGRES_DB}
+      GUARDIA_DB_USER: ${POSTGRES_USER}
+      GUARDIA_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      GUARDIA_JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      GUARDIA_STORAGE_ROOT: /data/evidence
+      GUARDIA_STORAGE_ENCRYPTION_KEY: ${STORAGE_ENCRYPTION_KEY:?Set STORAGE_ENCRYPTION_KEY in .env}
+      GUARDIA_CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    volumes:
+      - evidence_data:/data/evidence:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: ../../docker/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: ../../docker/worker.Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    shm_size: 1gb
+    tmpfs:
+      - /tmp
+    environment:
+      GUARDIA_ENVIRONMENT: ${GUARDIA_ENVIRONMENT:-development}
+      GUARDIA_DB_HOST: db
+      GUARDIA_DB_NAME: ${POSTGRES_DB}
+      GUARDIA_DB_USER: ${POSTGRES_USER}
+      GUARDIA_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      GUARDIA_JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      GUARDIA_STORAGE_ROOT: /data/evidence
+      GUARDIA_STORAGE_ENCRYPTION_KEY: ${STORAGE_ENCRYPTION_KEY:?Set STORAGE_ENCRYPTION_KEY in .env}
+      GUARDIA_CAPTURE_PROXY_URL: ${CAPTURE_PROXY_URL:-}
+    volumes:
+      - evidence_data:/data/evidence
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+    name: guardia_postgres_data
+  evidence_data:
+    name: guardia_evidence_data

@@ -1,3 +1,3 @@
 # PeaceTechHackathon
 
-The SAFE-ARCHIVE monorepo is in [safe-archive](safe-archive/README.md).
+The GUARDIA monorepo is in [guardia](guardia/README.md).
