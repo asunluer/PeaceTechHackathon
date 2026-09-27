@@ -1,0 +1,16 @@
+.env
+.DS_Store
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/node_modules/
+**/.svelte-kit/
+**/build/
+**/dist/
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/android/local.properties
+apps/mobile/ios/Flutter/Generated.xcconfig
+apps/mobile/ios/Flutter/flutter_export_environment.sh
+apps/mobile/ios/Pods/
+apps/mobile/ios/Runner/GeneratedPluginRegistrant.*
