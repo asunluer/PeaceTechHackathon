@@ -15,7 +15,7 @@
   <aside class="border-b border-slate-200 bg-slate-900 text-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-64 lg:flex-col lg:border-b-0">
     <div class="border-b border-white/10 px-6 py-6">
       <a href="/dashboard" class="flex items-center gap-3">
-        <span class="flex size-10 items-center justify-center rounded-lg bg-white text-sm font-bold text-slate-900">G</span>
+        <img src="/guardia.jpeg" alt="logo" width="32" height="32"/>
         <span class="text-sm font-semibold tracking-[0.16em]">GUARDIA</span>
       </a>
       <p class="mt-4 text-xs leading-5 text-slate-300">Public evidence preservation workspace</p>
