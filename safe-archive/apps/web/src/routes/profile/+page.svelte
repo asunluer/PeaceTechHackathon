@@ -10,8 +10,9 @@
 </svelte:head>
 
 <main class="mx-auto max-w-2xl px-6 py-16 text-slate-900">
-  <a href="/" class="text-sm font-semibold tracking-[0.18em] text-slate-700">SAFE-ARCHIVE</a>
+  <a href="/cases" class="text-sm font-semibold tracking-[0.18em] text-slate-700">SAFE-ARCHIVE</a>
   <h1 class="mt-10 text-3xl font-semibold">Your account</h1>
+  <a href="/cases" class="mt-5 inline-block rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white">Open workspace</a>
   <div class="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
     <dl class="space-y-4">
       <div>
@@ -27,15 +28,15 @@
   {#if form?.message}
     <p class="mt-6 text-sm text-red-800" role="alert">{form.message}</p>
   {/if}
-  <section class="mt-8 rounded-xl border border-slate-200 bg-white p-6">
-    <h2 class="font-semibold">Change password</h2>
+  <details class="mt-8 rounded-xl border border-slate-200 bg-white p-6">
+    <summary class="cursor-pointer font-semibold">Change password (optional)</summary>
     <form method="POST" action="?/changePassword" class="mt-4 grid gap-4">
       <label class="grid gap-1 text-sm">Current password<input type="password" name="current_password" required autocomplete="current-password" class="rounded-md border border-slate-300 p-2" /></label>
       <label class="grid gap-1 text-sm">New password<input type="password" name="new_password" required minlength="12" autocomplete="new-password" class="rounded-md border border-slate-300 p-2" /></label>
       <label class="grid gap-1 text-sm">Confirm new password<input type="password" name="confirmation" required minlength="12" autocomplete="new-password" class="rounded-md border border-slate-300 p-2" /></label>
       <button type="submit" class="w-fit rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Change password</button>
     </form>
-  </section>
+  </details>
   <form method="POST" action="?/logout" class="mt-8">
     <button type="submit" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700">Sign out</button>
   </form>

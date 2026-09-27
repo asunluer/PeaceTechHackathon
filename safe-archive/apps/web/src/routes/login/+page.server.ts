@@ -26,6 +26,6 @@ export const actions: Actions = {
 
     const token = (await response.json()) as { access_token: string; expires_in: number };
     setAccessToken(event, token.access_token, token.expires_in);
-    redirect(303, '/profile');
+    redirect(303, '/cases');
   }
 };

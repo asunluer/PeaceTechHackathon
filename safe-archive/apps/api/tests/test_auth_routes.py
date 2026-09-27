@@ -54,7 +54,8 @@ def test_authentication_and_role_guard_http_flow() -> None:
         jwt_secret=SecretStr("a-dedicated-test-secret-with-more-than-32-bytes"),
     )
     service = AuthService(MemoryUsers(), Argon2PasswordHasher(), PyJwtTokenCodec(settings))
-    asyncio.run(service.create_first_administrator("admin@example.org", "administrator-password"))
+    administrator = asyncio.run(service.create_first_administrator("admin@example.org", "administrator-password"))
+    asyncio.run(service.create_user(administrator, "admin@safe-archive.local", "local-test-password", Role.ADMINISTRATOR))
 
     app = FastAPI()
     app.include_router(auth_router, prefix="/api/v1")
@@ -73,6 +74,10 @@ def test_authentication_and_role_guard_http_flow() -> None:
         assert response.headers["cache-control"] == "no-store"
         admin_headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
         assert client.get("/api/v1/auth/me", headers=admin_headers).json()["role"] == "administrator"
+        local_token = client.post(token_url, data={"username": "admin@safe-archive.local", "password": "local-test-password"}).json()["access_token"]
+        local_account = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {local_token}"})
+        assert local_account.status_code == 200
+        assert local_account.json()["email"] == "admin@safe-archive.local"
 
         new_user = {"email": "investigator@example.org", "password": "investigator-password", "role": "ngo_investigator"}
         response = client.post("/api/v1/users", json=new_user, headers=admin_headers)
