@@ -62,4 +62,4 @@ jobs:
       - run: flutter pub get
         working-directory: guardia/apps/mobile
       - run: flutter build ios --simulator --no-codesign
-        working-directory: safe-archive/apps/mobile
+        working-directory: guardia/apps/mobile
